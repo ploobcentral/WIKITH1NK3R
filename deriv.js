@@ -249,7 +249,7 @@ client.once("ready", async () => {
     try {
         await client.application.commands.create(
             new ContextMenuCommandBuilder()
-            .setName("Ask Derivative...")
+            .setName("Ask H3LP3R...")
             .setType(ApplicationCommandType.Message)
             .setContexts([
                 0, // Guild (Server)
