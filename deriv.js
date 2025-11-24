@@ -1,9 +1,30 @@
-// deriv.js (CommonJS, Gemini 2.5 + wiki + auto relevance)
+// deriv.js
+require("dotenv").config();
+
+// --- IMPORTS ---
 const { MAIN_KEYS } = require("./geminikey.js");
 const { loadMemory, logMessage, memory: persistedMemory } = require("./memory.js");
-loadMemory();
+loadMemory(); 
 
-require("dotenv").config();
+// NEW IMPORTS FROM FUNCTIONS FOLDER
+const { urlToGenerativePart } = require("./functions/image_handling.js");
+const { 
+    loadPages, 
+    findCanonicalTitle, 
+    getWikiContent, 
+    getSectionContent, 
+    getLeadSection, 
+    parseWikiLinks, 
+    parseTemplates,
+    knownPages, 
+    API         
+} = require("./functions/parse_page.js");
+const { 
+    askGemini, 
+    askGeminiForPages, 
+    MESSAGES 
+} = require("./functions/conversation.js");
+
 const {
     Client,
     GatewayIntentBits,
@@ -16,9 +37,7 @@ const {
     ButtonStyle,
     ActionRowBuilder,
     ActivityType,
-    ChannelType
-} = require("discord.js");
-const {
+    ChannelType,
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
@@ -27,24 +46,9 @@ const {
     ApplicationCommandType
 } = require("discord.js");
 
-// node-fetch v3+ is ESM
-const fetch = (...args) => import("node-fetch").then(({
-    default: fetch
-}) => fetch(...args));
+// node-fetch wrapper 
+const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
-// dynamic import for @google/genai (ESM-only)
-let GoogleGenAI;
-async function getGeminiClient(apiKey) {
-    if (!GoogleGenAI) {
-        const mod = await import("@google/genai");
-        GoogleGenAI = mod.GoogleGenAI;
-    }
-    return new GoogleGenAI({
-        apiKey
-    });
-}
-
-// -------------------- CONFIG --------------------
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 // const AUTO_RESPONSE_CHANNEL_ID = "1423581041209118741";
 
@@ -781,7 +785,6 @@ async function askGemini(userInput, wikiContent = null, pageTitle = null, imageP
 }
 
 // -------------------- UTILITIES --------------------
-// The Discord maximum message length is 2000 characters.
 const DISCORD_MAX_LENGTH = 2000;
 
 function splitMessage(text, maxLength = DISCORD_MAX_LENGTH) {
@@ -846,56 +849,46 @@ function extractTaggedBotChunks(text) {
     return out;
 }
 
-// Function to convert a remote URL (like a Discord attachment) into a GenerativePart object
-async function urlToGenerativePart(url) {
+function safeSend(ctx, payload) {
+    if (!ctx) return;
+
     try {
-        const response = await fetch(url);
+        // Interaction (slash, context menu, modal)
+        if (typeof ctx.reply === "function") {
 
-        // 💡 FIX: Check the Content-Type *after* successful fetch and redirection.
-        // We will no longer rely solely on the initial response header if the URL looks like an image.
-        const contentType = response.headers.get("Content-Type");
+            // If payload is a string, convert it to a payload object
+            const data = typeof payload === "string" ? { content: payload } : payload;
 
-        // 1. Check if the URL ends in a common image extension
-        const urlIsImage = /\.(jpe?g|png|gif|webp)/i.test(url);
+            if (ctx.deferred) {
+                if (typeof ctx.editReply === "function") {
+                    return ctx.editReply(data);
+                }
+                return ctx.followUp ? ctx.followUp(data) : ctx.reply(data);
+            }
 
-        // 2. If the response content type is not an image AND the URL doesn't look like an image, skip it.
-        if (!contentType || (!contentType.startsWith("image/") && !urlIsImage)) {
-            console.error(`URL is not an image: ${url} (Content-Type: ${contentType})`);
-            return null; // Skip non-image content
+            if (ctx.replied) {
+                return ctx.followUp(data);
+            }
+
+            return ctx.reply(data);
         }
 
-        const buffer = await response.buffer();
-        const base64Data = buffer.toString("base64");
+        // Message object
+        if (ctx.channel && typeof ctx.channel.send === "function") {
+            if (typeof payload === "string") {
+                return ctx.channel.send(payload);
+            } else {
+                return ctx.channel.send(payload);
+            }
+        }
 
-        // 3. Use the Content-Type header if available, otherwise guess based on URL
-        const finalMimeType = contentType.startsWith("image/") ? contentType : (
-            url.endsWith('.png') ? 'image/png' : 'image/jpeg' // Basic fallback guess
-        );
-
-        return {
-            inlineData: {
-                data: base64Data,
-                mimeType: finalMimeType,
-            },
-        };
-    } catch (error) {
-        console.error("Error converting URL to GenerativePart:", error.message);
-        return null;
+        console.error("safeSend: No valid channel context.");
+    } catch (err) {
+        console.error("safeSend error:", err);
     }
 }
 
-// -------------------- DISCORD BOT --------------------
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.MessageContent,
-    ],
-    partials: [Partials.Channel],
-});
-
-// --- -------------------- STATUS ROTATION CONFIG --------------------
+// -------------------- STATUS --------------------
 const STATUS_OPTIONS = [{
         type: ActivityType.Custom,
         text: "just send [[a page]] and i'll appear!"
@@ -965,11 +958,20 @@ function setRandomStatus(client) {
     }
 }
 
+// -------------------- CLIENT SETUP --------------------
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.MessageContent,
+    ],
+    partials: [Partials.Channel],
+});
+
 client.once("ready", async () => {
     console.log(`Logged in as ${client.user.tag}`);
-    await loadPages();
-
-    // Set initial random status
+    await loadPages(); // Now calls the function from parse_page.js
     setRandomStatus(client);
 
     // Start status rotation interval (every 10 minutes)
@@ -998,6 +1000,7 @@ client.once("ready", async () => {
     }
 });
 
+// -------------------- HANDLER --------------------
 async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = false) {
     // 1. Initial validation
     if (!userMsg || !userMsg.trim()) return MESSAGES.noAIResponse;
@@ -1015,7 +1018,7 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
         // This is a Context Menu Interaction (like 'Ask Bestiary...')
         message = messageOrInteraction.targetMessage;
     } else if (messageOrInteraction.client._selectedMessage) {
-        // This is the message passed from the Modal Submit interaction
+        // This is a Context Menu Interaction (like 'Ask Bestiary...')
         message = messageOrInteraction.client._selectedMessage;
     }
     // If 'message' is null here, it means no message object is available for attachment checks.
@@ -1052,14 +1055,10 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
         let imageParts = [];
 
         if (uniqueImageURLs.length > 0) {
-            console.log(`Processing ${uniqueImageURLs.length} image(s)...`);
-            // Concurrently convert all image URLs to GenerativeParts
+            // CALLING FUNCTION FROM image_handling.js
             const partPromises = uniqueImageURLs.map(url => urlToGenerativePart(url));
             const parts = await Promise.all(partPromises);
-
-            // Filter out any failed conversions
             imageParts = parts.filter(part => part !== null);
-            console.log(`Successfully prepared ${imageParts.length} image part(s).`);
         }
 
         // C. Update userMsg if images are present (as discussed in the previous answer)
@@ -1071,29 +1070,30 @@ async function handleUserRequest(userMsg, messageOrInteraction, isEphemeral = fa
             }
         }
 
-// === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
-const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
-const linkMatches = [...userMsg.matchAll(wikiLinkRegex)];
-if (linkMatches.length) {
-    const resolved = [];
-    for (const m of linkMatches) {
-        const raw = m[1].trim();
-        const canonical = await findCanonicalTitle(raw);
-
-        if (!canonical) {
-            // Not a valid wiki page — do NOT call Gemini; reply "I don't know."
-            const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
-            if (isInteraction(messageOrInteraction)) {
-                try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
-            } else {
-                await messageOrInteraction.reply(replyOptions);
+        // === Instant wiki [[...]] handling (case-insensitive), and explicit {{...}} detection ===
+        const wikiLinkRegex = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g;
+        const linkMatches = [...userMsg.matchAll(wikiLinkRegex)];
+        if (linkMatches.length) {
+            const resolved = [];
+            for (const m of linkMatches) {
+                const raw = m[1].trim();
+                const canonical = await findCanonicalTitle(raw);
+        
+                if (!canonical) {
+                    // Not a valid wiki page — do NOT call Gemini; reply "I don't know."
+                    const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
+                    if (isInteraction(messageOrInteraction)) {
+                        try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
+                    } else {
+                        await messageOrInteraction.reply(replyOptions);
+                    }
+                    if (typingInterval) clearInterval(typingInterval);
+                    return;
+                }
+        
+                resolved.push(canonical);
             }
-            if (typingInterval) clearInterval(typingInterval);
-            return;
-        }
-
-        resolved.push(canonical);
-    }
+            
             // Deduplicate and build /wiki/ URLs without encoding ':' into %3A
             const uniqueResolved = [...new Set(resolved)];
             
@@ -1139,30 +1139,25 @@ if (linkMatches.length) {
             }
         
             const canonical = await findCanonicalTitle(rawTemplate);
+            
             if (!canonical) {
-                const replyOptions = { content: "I don't know.", allowedMentions: { repliedUser: false } };
-                if (messageOrInteraction.editReply) {
-                    try { await messageOrInteraction.editReply(replyOptions); } catch { await messageOrInteraction.followUp(replyOptions); }
-                } else {
-                    await messageOrInteraction.reply(replyOptions);
-                }
-                if (typingInterval) clearInterval(typingInterval);
-                return;
-            }
-        
-            explicitTemplateFoundTitle = canonical;
-        
-            if (sectionName) {
-                explicitTemplateContent = await getSectionContent(canonical, sectionName);
+                shouldUseComponentsV2 = false;
+                explicitTemplateContent = "I don't know.";
             } else {
-                // Replace getLeadSection() with a clean extract API call
-                const extractRes = await fetch(
-                    `${API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(canonical)}&format=json`
-                );
-                
-                const extractJson = await extractRes.json();
-                const pageObj = Object.values(extractJson.query.pages)[0];
-                explicitTemplateContent = pageObj.extract || "No content available.";
+                explicitTemplateFoundTitle = canonical;
+
+                if (sectionName) {
+                    explicitTemplateContent = await getSectionContent(canonical, sectionName);
+                } else {
+                    // Replace getLeadSection() with a clean extract API call
+                    const extractRes = await fetch(
+                        `${API}?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(canonical)}&format=json`
+                    );
+                    
+                    const extractJson = await extractRes.json();
+                    const pageObj = Object.values(extractJson.query.pages)[0];
+                    explicitTemplateContent = pageObj.extract || "No content available.";
+                }
             }
         
             explicitTemplateName = rawTemplate;
@@ -1172,14 +1167,20 @@ if (linkMatches.length) {
         let pageTitles = [];
         let wikiContent = "";
         
-        if (explicitTemplateFoundTitle && explicitTemplateContent) {
-            pageTitles = [explicitTemplateFoundTitle];
-            wikiContent = `\n\n--- Page: ${explicitTemplateFoundTitle} ---\n${explicitTemplateContent}`;
+        // 💡 UPDATED LOGIC: Checking skipGemini to prevent unnecessary calls
+        if (skipGemini) {
+            // We are in template mode. 
+            // If we found a title, assign it to pageTitles so image fetching works later.
+            if (explicitTemplateFoundTitle) {
+                pageTitles = [explicitTemplateFoundTitle];
+            }
+            // We intentionally do NOT call askGeminiForPages here.
         } else {
+            // Normal operation (non-template mode)
             pageTitles = await askGeminiForPages(userMsg);
             if (pageTitles.length) {
                 for (const pageTitle of pageTitles) {
-                    if (knownPages.includes(pageTitle)) {
+                    if (knownPages.includes(pageTitle)) { 
                         const content = await getWikiContent(pageTitle);
                         if (content) wikiContent += `\n\n--- Page: ${pageTitle} ---\n${content}`;
                     }
@@ -1201,8 +1202,8 @@ if (linkMatches.length) {
             reply = explicitTemplateContent || "I don't know.";
         }
 
-        let parsedReply = await parseTemplates(reply);  // expand {{ }}
-        parsedReply = await parseWikiLinks(parsedReply);      // convert [[ ]] → wiki links
+        let parsedReply = await parseTemplates(reply);  
+        parsedReply = await parseWikiLinks(parsedReply);
 
         // If this is an ephemeral message (Ask Derivative), strip the tags and force standard splitting
         if (isEphemeral) {
@@ -1427,6 +1428,7 @@ if (linkMatches.length) {
     }
 }
 
+// -------------------- EVENTS --------------------
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
