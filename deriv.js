@@ -170,23 +170,23 @@ const STATUS_OPTIONS = [{
     },
     {
         type: ActivityType.Custom,
-        text: "check out tagging.wiki!"
+        text: "check out sewh.miraheze.org!"
     },
     {
         type: ActivityType.Playing,
-        text: "untitled tag game"
+        text: "sewh"
     },
     {
         type: ActivityType.Listening,
-        text: "crashout by nicopatty"
+        text: "sewh ost"
     }, // Listening = 2
     {
         type: ActivityType.Watching,
-        text: "Special:RecentChanges - tagging.wiki"
+        text: "Special:RecentChanges - sewh.miraheze.org"
     }, // Watching = 3
     {
         type: ActivityType.Competing,
-        text: "Untitled Tag Game"
+        text: "Something Evil Will Happen"
     }, // Competing = 5
 ];
 
