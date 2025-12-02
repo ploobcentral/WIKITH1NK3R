@@ -14,7 +14,7 @@ async function getAllNamespaces() {
             format: "json"
         });
         const res = await fetch(`${API}?${params.toString()}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/H3LP3R" }
         });
         if (!res.ok) throw new Error(`Namespaces fetch failed: ${res.status}`);
         const json = await res.json();
@@ -65,7 +65,7 @@ async function getAllPages() {
 
                 const url = `${API}?${params.toString()}`;
                 const res = await fetch(url, {
-                    headers: { "User-Agent": "DiscordBot/Deriv" }
+                    headers: { "User-Agent": "DiscordBot/H3LP3R" }
                 });
                 if (!res.ok) throw new Error(`Failed: ${res.status} ${res.statusText}`);
                 const json = await res.json();
@@ -143,7 +143,7 @@ async function findCanonicalTitle(input) {
                 redirects: "1",
                 indexpageids: "1"
             });
-            const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/Deriv" } });
+            const res = await fetch(`${API}?${params.toString()}`, { headers: { "User-Agent": "DiscordBot/H3LP3R" } });
             if (!res.ok) continue;
             const json = await res.json();
 
@@ -217,7 +217,7 @@ async function getSectionIndex(pageTitle, sectionName) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/H3LP3R" }
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         const json = await res.json();
@@ -253,7 +253,7 @@ async function getSectionContent(pageTitle, sectionName) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/H3LP3R" }
         });
         const json = await res.json();
 
@@ -277,7 +277,7 @@ async function getLeadSection(pageTitle) {
 
     try {
         const res = await fetch(`${API}?${params}`, {
-            headers: { "User-Agent": "DiscordBot/Deriv" }
+            headers: { "User-Agent": "DiscordBot/H3LP3R" }
         });
         const json = await res.json();
         const html = json.parse?.text?.["*"];

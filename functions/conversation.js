@@ -36,30 +36,10 @@ function getCurrentMonthYear() {
     const currentMonth = monthNames[currentMonthIndex];
     const day = now.getDate();
 
-    // --- Previous Month/Year Logic ---
-    let previousMonthIndex;
-    let previousMonthYear;
-
-    if (currentMonthIndex === 0) {
-        // If it's January (index 0), previous month is December (index 11)
-        previousMonthIndex = 11;
-        // And the previous year is the current year minus 1
-        previousMonthYear = currentYear - 1;
-    } else {
-        // Otherwise, previous month is simply the index before the current one
-        previousMonthIndex = currentMonthIndex - 1;
-        // And the year is the current year
-        previousMonthYear = currentYear;
-    }
-
-    const previousMonth = monthNames[previousMonthIndex];
-
     return {
         currentMonth,
         currentYear,
-        day,
-        previousMonth,
-        previousMonthYear // Added to handle Jan -> Dec previous year
+        day
     };
 }
 
@@ -67,9 +47,7 @@ function getSystemInstruction() {
     const {
         currentMonth,
         currentYear,
-        day,
-        previousMonth,
-        previousMonthYear
+        day
     } = getCurrentMonthYear();
     
     return `You are WIKITH1NK3R, commonly known as H3LP3R, a character from the Roblox game Something Evil Will Happen. In the game, you are a robot.
